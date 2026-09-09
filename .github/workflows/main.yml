@@ -18,40 +18,32 @@ jobs:
       - name: Tarik Repo Runner (Checkout Self)
         uses: actions/checkout@v4
 
-      - name: Setup Server Credentials, SSH & VNC (Screen Sharing)
+      - name: Setup Server Credentials, SSH & VNC
         run: |
-          # Reset/Set password untuk user 'runner' menggunakan sysadminctl (lebih sakti dari dscl)
+          # Reset/Set password untuk user 'runner' menggunakan sysadminctl (Bypass Error dscl)
           sudo sysadminctl -resetPasswordFor runner -newPassword "${{ secrets.RDP_PASS }}"
           
           # Aktifkan SSH Remote Login
           sudo systemsetup -setremotelogin on
           
           # Aktifkan VNC Server (Apple Remote Desktop)
-          # Note: Password VNC macOS maksimal 8 karakter, jika lebih akan dipotong otomatis.
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
-          
-      - name: Install Network Core (Tailscale)
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-          hostname: "macos-azure-temp"
-          args: --accept-routes --advertise-exit-node
 
-      - name: Install Dependencies & Network Core (Homebrew)
+      - name: Install Network & Dependencies (PKG & Homebrew)
         run: |
+          echo "[1/4] Mengunduh & Install Tailscale PKG..."
+          curl -L https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg -o tailscale.pkg
+          sudo installer -pkg tailscale.pkg -target /
+          
+          echo "[2/4] Menjalankan Tailscale & Login..."
+          # Eksekusi CLI dari dalam file aplikasi macOS-nya
+          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
+          
+          echo "[3/4] Install Dependencies (Homebrew)..."
           brew update
-          # Install Tailscale berbarengan dengan package lainnya
-          brew install tailscale cloudflared nmap jq wget ttyd neofetch speedtest-cli
+          brew install cloudflared nmap jq wget ttyd neofetch speedtest-cli
           
-          # 1. Jalankan daemon Tailscale di background
-          sudo tailscaled > /tmp/tailscaled.log 2>&1 &
-          sleep 5 # Kasih jeda 5 detik agar daemon siap
-          
-          # 2. Login ke Tailscale secara manual
-          # (Warning 'authkey' OAuth diabaikan saja, dan --advertise-exit-node dihapus agar tidak error kext)
-          sudo tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
-          
-          # 3. Setup Cloudflared Tunnel (Background Service)
+          echo "[4/4] Setup Cloudflared Tunnel..."
           sudo cloudflared service install ${{ secrets.CF_TUNNEL_TOKEN }}
 
       - name: Jalankan Web Terminal (ZSH Root)
@@ -60,7 +52,7 @@ jobs:
           nohup sudo ttyd -W -p 7681 -c parid:paridos /bin/zsh > /tmp/ttyd.log 2>&1 &
 
       - name: Get Tailscale IP
-        run: echo "TAILSCALE_IP=$(tailscale ip -4)" >> $GITHUB_ENV
+        run: echo "TAILSCALE_IP=$(/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4)" >> $GITHUB_ENV
 
       - name: Run AzureBot Core Engine (ZSH)
         shell: bash {0}
@@ -189,7 +181,6 @@ jobs:
                       cd "$DIR" 2>/dev/null
                       send_msg "[ZSH] 📁 Pindah ke: <code>$(pwd)</code>"
                     else
-                      # Eksekusi dengan ZSH dan Root
                       OUT=$(sudo zsh -c "$ARGS" 2>&1)
                       if [ -z "$OUT" ]; then OUT="(Sukses / Tidak ada output)"; fi
                       OUT=$(echo "$OUT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
@@ -219,5 +210,6 @@ jobs:
           sudo pkill -9 ttyd || true
           
           echo "[2/2] Memutuskan koneksi Tailscale..."
-          sudo tailscale logout || true
-          echo "==== MACOS SERVER SHUTTED DOWN GRACEFULLY ===="
+          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale logout || true
+          echo "==== CONNECTION WITH TAILSCALE WAS CUTOFF GRACEFULLY ===="
+          echo "==== MACOS SERVER SHUTTED DOWN PEACEFULLY ===="
