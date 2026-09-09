@@ -20,47 +20,40 @@ jobs:
 
       - name: Setup Server Credentials, SSH & VNC
         run: |
-          # Reset/Set password untuk user 'runner' menggunakan sysadminctl (Bypass Error dscl)
           sudo sysadminctl -resetPasswordFor runner -newPassword "${{ secrets.RDP_PASS }}"
-          
-          # Aktifkan SSH Remote Login
           sudo systemsetup -setremotelogin on
-          
-          # Aktifkan VNC Server (Apple Remote Desktop)
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
 
-      - name: Install Network & Dependencies (PKG & Homebrew)
+      - name: Install Network & Ngrok (PKG & Homebrew)
         run: |
           echo "[1/4] Mengunduh & Install Tailscale PKG..."
           curl -L https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg -o tailscale.pkg
           sudo installer -pkg tailscale.pkg -target /
-          
-          echo "[2/4] Menjalankan Tailscale Daemon & Login..."
-          # Nyalakan tailscaled secara manual di background agar CLI tidak block/freezing
           sudo /Applications/Tailscale.app/Contents/MacOS/tailscaled &
           sleep 3
+          sudo timeout 20 /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes --netfilter-mode=off || true
           
-          # Login dengan batasan waktu (timeout) 20 detik agar tidak nyangkut selamanya
-          sudo timeout 20 /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes || true
+          echo "[2/4] Install Dependencies & Ngrok (Homebrew)..."
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install ngrok/ngrok/ngrok nmap jq wget ttyd fastfetch speedtest-cli
           
-          echo "[3/4] Install Dependencies (Homebrew)..."
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install cloudflared nmap jq wget ttyd fastfetch speedtest-cli
+          echo "[3/4] Konfigurasi Ngrok AuthToken..."
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
           
-          echo "[4/4] Setup Cloudflared Tunnel..."
-          sudo cloudflared service install ${{ secrets.CF_TUNNEL_TOKEN }}
+          echo "[4/4] Menjalankan Ngrok TCP Tunnel untuk VNC (Port 5900)..."
+          nohup ngrok tcp 5900 --log=stdout > /tmp/ngrok.log 2>&1 &
+          sleep 4
 
       - name: Jalankan Web Terminal (ZSH Root)
         run: |
-          # Jalankan ttyd langsung pakai zsh dan akses root
           nohup sudo ttyd -W -p 7681 -c parid:paridos /bin/zsh > /tmp/ttyd.log 2>&1 &
 
       - name: Get Tailscale IP
         run: |
-          IP=$(timeout 10 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "100.64.0.X")
+          IP=$(timeout 5 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "100.64.0.X")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
-          
+
       - name: Run AzureBot Core Engine (ZSH)
-        shell: zsh {0}
+        shell: bash {0}
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -76,12 +69,10 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -H "Content-Type: application/json" -d @- > /dev/null
           }
 
-          # Daftar Menu (neofetch diganti ke fastfetch di deskripsi menu)
           curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/setMyCommands" \
             -H "Content-Type: application/json" \
             -d '{"commands": [{"command": "help", "description": "Panduan Bot"}, {"command": "status", "description": "Cek beban & spek CPU/RAM"}, {"command": "ip", "description": "Akses SSH & VNC"}, {"command": "fastfetch", "description": "Spek sistem detail"}, {"command": "speedtest", "description": "Test speed internet"}, {"command": "fetch", "description": "Ambil file dr server ke TG"}, {"command": "scanhost", "description": "Nmap target IP"}, {"command": "kill", "description": "pkill proses macOS"}, {"command": "cmd", "description": "Jalankan ZSH (Root)"}]}' > /dev/null
 
-          # FLUSH PENDING UPDATES
           LATEST=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates")
           LAST_ID=$(echo "$LATEST" | jq -r '.result[-1].update_id // empty')
           if [ -n "$LAST_ID" ] && [ "$LAST_ID" != "null" ]; then
@@ -91,7 +82,11 @@ jobs:
             OFFSET=0
           fi
 
-          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n'"IP: <code>$TAILSCALE_IP</code>"$'\n'"User: <code>runner</code>"$'\n'"Pass: <code>$PTERO_DB_PASS</code>"$'\n\n'"[WEB] <b>Services:</b>"$'\n'"VNC Viewer: <code>mac.paridx.my.id</code> (Port 5900 via Tunnel)"$'\n'"Web ZSH: <code>http://$TAILSCALE_IP:7681</code>"
+          # Ambil Public TCP URL dari Ngrok API lokal
+          NGROK_TCP=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[0].public_url // "Gagal memuat Ngrok"')
+          CLEAN_NGROK=$(echo "$NGROK_TCP" | sed 's|tcp://||')
+
+          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n''- VNC Address: <code>$CLEAN_NGROK</code>'$'\n''- Pass VNC: <code>$PTERO_DB_PASS</code>'$'\n\n''[WEB] <b>Web ZSH:</b> <code>http://$TAILSCALE_IP:7681</code>"
 
           while true; do
             UPDATES=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
@@ -108,7 +103,6 @@ jobs:
                 continue
               fi
 
-              # Handle Auto-Upload Document via Telegram
               DOC_ID=$(echo "$DECODED" | jq -r '(.message.document.file_id // .message.photo[-1].file_id // .message.video.file_id // .message.audio.file_id // empty)')
               if [ -n "$DOC_ID" ]; then
                 DOC_NAME=$(echo "$DECODED" | jq -r '(.message.document.file_name // .message.video.file_name // .message.audio.file_name // empty)')
@@ -127,7 +121,6 @@ jobs:
                 continue
               fi
 
-              # Handle Text Commands
               TEXT=$(echo "$DECODED" | jq -r '.message.text // .message.caption // empty')
               if [ -z "$TEXT" ]; then continue; fi
               
@@ -137,7 +130,7 @@ jobs:
                 
                 case "$CMD" in
                   /help|/start) send_msg "[INFO] <b>COMMAND CENTER (MacOS)</b>" ;;
-                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n'"IP: <code>$TAILSCALE_IP</code>"$'\n'"User: <code>runner</code>"$'\n'"Pass: <code>$PTERO_DB_PASS</code>" ;;
+                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n''- VNC Address: <code>$CLEAN_NGROK</code>'$'\n''- Pass VNC: <code>$PTERO_DB_PASS</code>" ;;
                   /fastfetch) 
                     OUT=$(fastfetch -l none)
                     send_msg "[SYS] <b>Fastfetch:</b>"$'\n'"<pre>${OUT}</pre>" 
@@ -146,7 +139,7 @@ jobs:
                     CPU_MODEL=$(sysctl -n machdep.cpu.brand_string)
                     RAM_TOTAL_GB=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
                     UP=$(uptime | awk -F'( |,|:)+' '{print $6 " hours, " $7 " mins"}')
-                    send_msg "[STATS] <b>SERVER HEALTH</b>"$'\n'"- CPU: ${CPU_MODEL}"$'\n'"- RAM Total: ${RAM_TOTAL_GB} GB"$'\n'"- Uptime: ${UP}"
+                    send_msg "[STATS] <b>SERVER HEALTH</b>"$'\n''- CPU: ${CPU_MODEL}'$'\n''- RAM Total: ${RAM_TOTAL_GB} GB'$'\n''- Uptime: ${UP}'
                     ;;
                   /speedtest)
                     OUT=$(speedtest-cli --simple)
@@ -211,10 +204,11 @@ jobs:
         if: always()
         run: |
           echo "==== MEMULAI DOOMSDAY PROTOCOL ===="
-          echo "[1/2] Membunuh proses background..."
+          echo "[1/3] Membunuh proses background..."
           sudo pkill -9 ttyd || true
+          pkill -9 ngrok || true
           
-          echo "[2/2] Memutuskan koneksi Tailscale..."
+          echo "[2/3] Memutuskan koneksi Tailscale..."
           sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale logout || true
           echo "==== CONNECTION WITH TAILSCALE WAS CUTOFF GRACEFULLY ===="
           echo "==== MACOS SERVER SHUTTED DOWN PEACEFULLY ===="
