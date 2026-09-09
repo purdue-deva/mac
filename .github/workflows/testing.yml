@@ -28,10 +28,19 @@ jobs:
           version: latest
           hostname: macos-azure-temp
 
-      - name: Install Dependencies (Homebrew)
+      - name: Install Dependencies & Tailscale CLI (Homebrew)
         run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install nmap jq wget ttyd fastfetch speedtest-cli
+          echo "[1/2] Install Tailscale & Dependencies..."
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install tailscale nmap jq wget ttyd fastfetch speedtest-cli
           sleep 2
+          
+          echo "[2/2] Menjalankan Tailscale Daemon CLI..."
+          TAILSCALED_BIN=$(which tailscaled)
+          TAILSCALE_BIN=$(which tailscale)
+          
+          sudo $TAILSCALED_BIN > /tmp/tailscaled.log 2>&1 &
+          sleep 5
+          sudo $TAILSCALE_BIN up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
 
       - name: Jalankan Web Terminal (ZSH Root)
         run: |
@@ -39,9 +48,10 @@ jobs:
 
       - name: Get Tailscale IP
         run: |
-          IP=$(tailscale ip -4)
+          TAILSCALE_BIN=$(which tailscale)
+          IP=$(timeout 5 $TAILSCALE_BIN ip -4 || echo "Gagal mendapatkan IP")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
-
+          
       - name: Run AzureBot Core Engine (ZSH)
         shell: bash {0}
         env:
