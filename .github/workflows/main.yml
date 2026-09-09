@@ -1,0 +1,215 @@
+name: macos-server-ephemeral
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'
+
+concurrency:
+  group: tailscale-exit-node
+  cancel-in-progress: true
+
+jobs:
+  macos-server:
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Tarik Repo Runner (Checkout Self)
+        uses: actions/checkout@v4
+
+      - name: Setup Server Credentials, SSH & VNC (Screen Sharing)
+        run: |
+          # Set password untuk user 'runner' di macOS
+          sudo dscl . -passwd /Users/runner "${{ secrets.RDP_PASS }}"
+          
+          # Aktifkan SSH Remote Login
+          sudo systemsetup -setremotelogin on
+          
+          # Aktifkan VNC Server (Apple Remote Desktop)
+          # Note: Password VNC macOS maksimal 8 karakter, jika lebih akan dipotong otomatis.
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
+
+      - name: Install Network Core (Tailscale)
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          hostname: "macos-azure-temp"
+          args: --accept-routes --advertise-exit-node
+
+      - name: Install Dependencies & Cloudflared via Homebrew
+        run: |
+          brew update
+          brew install cloudflared nmap jq wget ttyd neofetch speedtest-cli
+          
+          # Setup Cloudflared Tunnel (Background Service)
+          # Pastikan di dashboard Cloudflare Zero Trust, domain mac.paridx.my.id di-route ke tcp://localhost:5900
+          sudo cloudflared service install ${{ secrets.CF_TUNNEL_TOKEN }}
+
+      - name: Jalankan Web Terminal (ZSH Root)
+        run: |
+          # Jalankan ttyd langsung pakai zsh dan akses root
+          nohup sudo ttyd -W -p 7681 -c parid:paridos /bin/zsh > /tmp/ttyd.log 2>&1 &
+
+      - name: Get Tailscale IP
+        run: echo "TAILSCALE_IP=$(tailscale ip -4)" >> $GITHUB_ENV
+
+      - name: Run AzureBot Core Engine (ZSH)
+        shell: bash {0}
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
+          PTERO_DB_PASS: ${{ secrets.RDP_PASS }}
+        run: |
+          set +e 
+          set +o pipefail
+
+          send_msg() {
+            local msg="$1"
+            jq -n --arg cid "$CHAT_ID" --arg txt "$msg" '{chat_id: $cid, text: $txt, parse_mode: "HTML"}' | \
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -H "Content-Type: application/json" -d @- > /dev/null
+          }
+
+          # Daftar Menu
+          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/setMyCommands" \
+            -H "Content-Type: application/json" \
+            -d '{"commands": [{"command": "help", "description": "Panduan Bot"}, {"command": "status", "description": "Cek beban & spek CPU/RAM"}, {"command": "ip", "description": "Akses SSH & VNC"}, {"command": "neofetch", "description": "Spek sistem detail"}, {"command": "speedtest", "description": "Test speed internet"}, {"command": "fetch", "description": "Ambil file dr server ke TG"}, {"command": "scanhost", "description": "Nmap target IP"}, {"command": "kill", "description": "pkill proses macOS"}, {"command": "cmd", "description": "Jalankan ZSH (Root)"}]}' > /dev/null
+
+          # FLUSH PENDING UPDATES
+          LATEST=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates")
+          LAST_ID=$(echo "$LATEST" | jq -r '.result[-1].update_id // empty')
+          if [ -n "$LAST_ID" ] && [ "$LAST_ID" != "null" ]; then
+            OFFSET=$((LAST_ID + 1))
+            curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET" > /dev/null
+          else
+            OFFSET=0
+          fi
+
+          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n'"IP: <code>$TAILSCALE_IP</code>"$'\n'"User: <code>runner</code>"$'\n'"Pass: <code>$PTERO_DB_PASS</code>"$'\n\n'"[WEB] <b>Services:</b>"$'\n'"VNC Viewer: <code>mac.paridx.my.id</code> (Port 5900 via Tunnel)"$'\n'"Web ZSH: <code>http://$TAILSCALE_IP:7681</code>"
+
+          while true; do
+            UPDATES=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
+            
+            for ROW in $(echo "$UPDATES" | jq -r '.result[] | @base64' 2>/dev/null); do
+              DECODED=$(echo "$ROW" | base64 --decode)
+              
+              UPDATE_ID=$(echo "$DECODED" | jq -r '.update_id')
+              OFFSET=$((UPDATE_ID + 1))
+              
+              USER_ID=$(echo "$DECODED" | jq -r '.message.from.id')
+              
+              if [ "$USER_ID" != "$CHAT_ID" ]; then
+                continue
+              fi
+
+              # Handle Auto-Upload Document via Telegram
+              DOC_ID=$(echo "$DECODED" | jq -r '(.message.document.file_id // .message.photo[-1].file_id // .message.video.file_id // .message.audio.file_id // empty)')
+              if [ -n "$DOC_ID" ]; then
+                DOC_NAME=$(echo "$DECODED" | jq -r '(.message.document.file_name // .message.video.file_name // .message.audio.file_name // empty)')
+                if [ -z "$DOC_NAME" ]; then DOC_NAME="media_$(date +%s)"; fi
+                
+                send_msg "[SYS] Mengunduh <b>$DOC_NAME</b> dari Telegram..."
+                
+                FILE_INFO=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$DOC_ID")
+                FILE_PATH=$(echo "$FILE_INFO" | jq -r '.result.file_path // empty')
+                if [ -n "$FILE_PATH" ]; then
+                  curl -s -o "/Users/runner/Downloads/$DOC_NAME" "https://api.telegram.org/file/bot$BOT_TOKEN/$FILE_PATH"
+                  send_msg "[+] Tersimpan di: <code>/Users/runner/Downloads/$DOC_NAME</code>"
+                else
+                  send_msg "[X] Gagal mengambil file."
+                fi
+                continue
+              fi
+
+              # Handle Text Commands
+              TEXT=$(echo "$DECODED" | jq -r '.message.text // .message.caption // empty')
+              if [ -z "$TEXT" ]; then continue; fi
+              
+              if [[ "$TEXT" == /* ]]; then
+                CMD=$(echo "$TEXT" | awk '{print $1}')
+                ARGS=$(echo "$TEXT" | cut -s -d' ' -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                
+                case "$CMD" in
+                  /help|/start) send_msg "[INFO] <b>COMMAND CENTER (MacOS)</b>" ;;
+                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n'"IP: <code>$TAILSCALE_IP</code>"$'\n'"User: <code>runner</code>"$'\n'"Pass: <code>$PTERO_DB_PASS</code>" ;;
+                  /neofetch) 
+                    OUT=$(neofetch --stdout)
+                    send_msg "[SYS] <b>Neofetch:</b>"$'\n'"<pre>${OUT}</pre>" 
+                    ;;
+                  /status)
+                    CPU_MODEL=$(sysctl -n machdep.cpu.brand_string)
+                    RAM_TOTAL_GB=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
+                    UP=$(uptime | awk -F'( |,|:)+' '{print $6 " hours, " $7 " mins"}')
+                    send_msg "[STATS] <b>SERVER HEALTH</b>"$'\n'"- CPU: ${CPU_MODEL}"$'\n'"- RAM Total: ${RAM_TOTAL_GB} GB"$'\n'"- Uptime: ${UP}"
+                    ;;
+                  /speedtest)
+                    OUT=$(speedtest-cli --simple)
+                    send_msg "[NET] <b>Speedtest:</b>"$'\n'"<pre>${OUT}</pre>"
+                    ;;
+                  /scanhost)
+                    if [ -z "$ARGS" ]; then
+                      send_msg "[X] Error: Masukkan IP/Domain target!"
+                    else
+                      OUT=$(sudo nmap -Pn -F "$ARGS" 2>&1)
+                      send_msg "[SCAN] <b>Nmap Result:</b>"$'\n'"<pre>${OUT}</pre>"
+                    fi
+                    ;;
+                  /kill)
+                    if [ -z "$ARGS" ]; then
+                      send_msg "[X] Error: Masukkan nama proses!"
+                    else
+                      OUT=$(sudo pkill -9 -f "$ARGS" && echo "Killed" || echo "Not Found")
+                      send_msg "[KILL] <pre>${OUT}</pre>"
+                    fi
+                    ;;
+                  /fetch)
+                    if [ -f "$ARGS" ]; then
+                      send_msg "[SYS] Mengunggah <code>$ARGS</code> ke Telegram..."
+                      curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+                        -F "chat_id=$CHAT_ID" \
+                        -F "document=@$ARGS" > /dev/null
+                    else
+                      send_msg "[X] File tidak ditemukan di path: <code>$ARGS</code>"
+                    fi
+                    ;;
+                  /cmd)
+                    if [ -z "$ARGS" ]; then
+                      send_msg "[X] Error: Masukkan perintah ZSH!"
+                    elif [[ "$ARGS" == cd\ * ]]; then
+                      DIR=$(echo "$ARGS" | sed 's/^cd //')
+                      cd "$DIR" 2>/dev/null
+                      send_msg "[ZSH] 📁 Pindah ke: <code>$(pwd)</code>"
+                    else
+                      # Eksekusi dengan ZSH dan Root
+                      OUT=$(sudo zsh -c "$ARGS" 2>&1)
+                      if [ -z "$OUT" ]; then OUT="(Sukses / Tidak ada output)"; fi
+                      OUT=$(echo "$OUT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+                      send_msg "[ZSH Root] <b>Output:</b>"$'\n'"<pre>${OUT}</pre>"
+                    fi
+                    ;;
+                  *)
+                    send_msg "⚠️ Command <code>$CMD</code> tidak dikenali."
+                    ;;
+                esac
+              else
+                PAYLOAD=$(jq -n --arg text "$TEXT" '{model: "openai/gpt-oss-120b", messages: [{"role": "system", "content": "Kamu AzureBot, asisten server MacOS. Jawab singkat."}, {"role": "user", "content": $text}]}')
+                RESPONSE=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" -H "Authorization: Bearer $GROQ_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
+                AI_REPLY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "⚠️ API Error"' 2>/dev/null)
+                AI_REPLY=$(echo "$AI_REPLY" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+                send_msg "$AI_REPLY"
+              fi
+            done
+            sleep 1
+          done
+
+      - name: Doomsday Backup & Cleanup
+        if: always()
+        run: |
+          echo "==== MEMULAI DOOMSDAY PROTOCOL ===="
+          echo "[1/2] Membunuh proses background..."
+          sudo pkill -9 ttyd || true
+          
+          echo "[2/2] Memutuskan koneksi Tailscale..."
+          sudo tailscale logout || true
+          echo "==== MACOS SERVER SHUTTED DOWN GRACEFULLY ===="
