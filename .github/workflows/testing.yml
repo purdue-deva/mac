@@ -40,6 +40,8 @@ jobs:
           sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
           
           echo "[3/4] Install Dependencies (Homebrew)..."
+          # brew update dihapus biar setup jauh lebih ngebut!
+          # neofetch diganti jadi fastfetch karena neofetch udah mati
           brew install cloudflared nmap jq wget ttyd fastfetch speedtest-cli
           
           echo "[4/4] Setup Cloudflared Tunnel..."
@@ -70,10 +72,10 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -H "Content-Type: application/json" -d @- > /dev/null
           }
 
-          # Daftar Menu
+          # Daftar Menu (neofetch diganti ke fastfetch di deskripsi menu)
           curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/setMyCommands" \
             -H "Content-Type: application/json" \
-            -d '{"commands": [{"command": "help", "description": "Panduan Bot"}, {"command": "status", "description": "Cek beban & spek CPU/RAM"}, {"command": "ip", "description": "Akses SSH & VNC"}, {"command": "neofetch", "description": "Spek sistem detail"}, {"command": "speedtest", "description": "Test speed internet"}, {"command": "fetch", "description": "Ambil file dr server ke TG"}, {"command": "scanhost", "description": "Nmap target IP"}, {"command": "kill", "description": "pkill proses macOS"}, {"command": "cmd", "description": "Jalankan ZSH (Root)"}]}' > /dev/null
+            -d '{"commands": [{"command": "help", "description": "Panduan Bot"}, {"command": "status", "description": "Cek beban & spek CPU/RAM"}, {"command": "ip", "description": "Akses SSH & VNC"}, {"command": "fastfetch", "description": "Spek sistem detail"}, {"command": "speedtest", "description": "Test speed internet"}, {"command": "fetch", "description": "Ambil file dr server ke TG"}, {"command": "scanhost", "description": "Nmap target IP"}, {"command": "kill", "description": "pkill proses macOS"}, {"command": "cmd", "description": "Jalankan ZSH (Root)"}]}' > /dev/null
 
           # FLUSH PENDING UPDATES
           LATEST=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates")
@@ -132,9 +134,9 @@ jobs:
                 case "$CMD" in
                   /help|/start) send_msg "[INFO] <b>COMMAND CENTER (MacOS)</b>" ;;
                   /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n'"IP: <code>$TAILSCALE_IP</code>"$'\n'"User: <code>runner</code>"$'\n'"Pass: <code>$PTERO_DB_PASS</code>" ;;
-                  /neofetch) 
-                    OUT=$(neofetch --stdout)
-                    send_msg "[SYS] <b>Neofetch:</b>"$'\n'"<pre>${OUT}</pre>" 
+                  /fastfetch) 
+                    OUT=$(fastfetch -l none)
+                    send_msg "[SYS] <b>Fastfetch:</b>"$'\n'"<pre>${OUT}</pre>" 
                     ;;
                   /status)
                     CPU_MODEL=$(sysctl -n machdep.cpu.brand_string)
