@@ -49,7 +49,7 @@ jobs:
 
       - name: Get Tailscale IP
         run: |
-          IP=$(timeout 5 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "Gagal dapet ip bos")
+          IP=$(timeout 5 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "100.64.0.X")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
 
       - name: Run AzureBot Core Engine (ZSH)
@@ -86,7 +86,7 @@ jobs:
           NGROK_TCP=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[0].public_url // "Gagal memuat Ngrok"')
           CLEAN_NGROK=$(echo "$NGROK_TCP" | sed 's|tcp://||')
 
-          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n''- VNC Address: <code>$CLEAN_NGROK</code>'$'\n''- Pass VNC: <code>$PTERO_DB_PASS</code>'$'\n\n''[WEB] <b>Web ZSH:</b> <code>http://$TAILSCALE_IP:7681</code>"
+          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$CLEAN_NGROK</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>"$'\n\n'"[WEB] <b>Web ZSH:</b> <code>http://$TAILSCALE_IP:7681</code>"
 
           while true; do
             UPDATES=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
@@ -130,7 +130,7 @@ jobs:
                 
                 case "$CMD" in
                   /help|/start) send_msg "[INFO] <b>COMMAND CENTER (MacOS)</b>" ;;
-                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n''- VNC Address: <code>$CLEAN_NGROK</code>'$'\n''- Pass VNC: <code>$PTERO_DB_PASS</code>" ;;
+                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$CLEAN_NGROK</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>" ;;
                   /fastfetch) 
                     OUT=$(fastfetch -l none)
                     send_msg "[SYS] <b>Fastfetch:</b>"$'\n'"<pre>${OUT}</pre>" 
@@ -139,7 +139,7 @@ jobs:
                     CPU_MODEL=$(sysctl -n machdep.cpu.brand_string)
                     RAM_TOTAL_GB=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
                     UP=$(uptime | awk -F'( |,|:)+' '{print $6 " hours, " $7 " mins"}')
-                    send_msg "[STATS] <b>SERVER HEALTH</b>"$'\n''- CPU: ${CPU_MODEL}'$'\n''- RAM Total: ${RAM_TOTAL_GB} GB'$'\n''- Uptime: ${UP}'
+                    send_msg "[STATS] <b>SERVER HEALTH</b>"$'\n'"- CPU: ${CPU_MODEL}"$'\n'"- RAM Total: ${RAM_TOTAL_GB} GB"$'\n'"- Uptime: ${UP}"
                     ;;
                   /speedtest)
                     OUT=$(speedtest-cli --simple)
@@ -199,16 +199,3 @@ jobs:
             done
             sleep 1
           done
-
-      - name: Doomsday Backup & Cleanup
-        if: always()
-        run: |
-          echo "==== MEMULAI DOOMSDAY PROTOCOL ===="
-          echo "[1/3] Membunuh proses background..."
-          sudo pkill -9 ttyd || true
-          pkill -9 ngrok || true
-          
-          echo "[2/3] Memutuskan koneksi Tailscale..."
-          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale logout || true
-          echo "==== CONNECTION WITH TAILSCALE WAS CUTOFF GRACEFULLY ===="
-          echo "==== MACOS SERVER SHUTTED DOWN PEACEFULLY ===="
