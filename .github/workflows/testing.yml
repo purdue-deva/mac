@@ -43,7 +43,7 @@ jobs:
       - name: Get Tailscale IP
         run: |
           TAILSCALE_BIN=$(which tailscale)
-          IP=$(timeout 10 $TAILSCALE_BIN ip -4 || echo "ERROR_TAILSCALE_FAILED")
+          IP=$(timeout 10 tailscale ip -4 || echo "ERROR_TAILSCALE_FAILED")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
           
       - name: Run AzureBot Core Engine (ZSH)
