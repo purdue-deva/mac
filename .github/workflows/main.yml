@@ -40,15 +40,15 @@ jobs:
       - name: Install Dependencies & Network Core (Homebrew)
         run: |
           brew update
-          # Install semua kebutuhan termasuk Tailscale
+          # Install Tailscale berbarengan dengan package lainnya
           brew install tailscale cloudflared nmap jq wget ttyd neofetch speedtest-cli
           
           # 1. Jalankan daemon Tailscale di background
           sudo tailscaled > /tmp/tailscaled.log 2>&1 &
-          sleep 5 # Kasih waktu daemon buat bernapas
+          sleep 5 # Kasih jeda 5 detik agar daemon siap
           
-          # 2. Login ke Tailscale
-          # (Note: --advertise-exit-node dihilangkan karena macOS butuh permission GUI/kext khusus untuk exit node)
+          # 2. Login ke Tailscale secara manual
+          # (Warning 'authkey' OAuth diabaikan saja, dan --advertise-exit-node dihapus agar tidak error kext)
           sudo tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
           
           # 3. Setup Cloudflared Tunnel (Background Service)
