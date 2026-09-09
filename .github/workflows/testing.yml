@@ -21,13 +21,6 @@ jobs:
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
           sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
 
-      - name: Setup Tailscale (Official)
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-          version: latest
-          hostname: macos-azure-temp
-
       - name: Install Dependencies & Tailscale CLI (Homebrew)
         run: |
           echo "[1/2] Install Tailscale & Dependencies..."
@@ -49,9 +42,9 @@ jobs:
       - name: Get Tailscale IP
         run: |
           TAILSCALE_BIN=$(which tailscale)
-          IP=$(timeout 5 $TAILSCALE_BIN ip -4 || echo "Gagal mendapatkan IP")
+          IP=$(timeout 5 $TAILSCALE_BIN ip -4 || echo "100.64.0.X")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
-          
+
       - name: Run AzureBot Core Engine (ZSH)
         shell: bash {0}
         env:
