@@ -27,11 +27,12 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE=1 brew install tailscale nmap jq wget ttyd fastfetch speedtest-cli
           sleep 2
           
-          echo "[2/2] Menjalankan Tailscale Daemon CLI..."
+          echo "[2/2] Menjalankan Tailscale Daemon CLI (Userspace Mode)..."
           TAILSCALED_BIN=$(which tailscaled)
           TAILSCALE_BIN=$(which tailscale)
           
-          sudo $TAILSCALED_BIN > /tmp/tailscaled.log 2>&1 &
+          # Ini kuncinya: Paksa ngebypass kernel macOS pakai userspace-networking
+          sudo $TAILSCALED_BIN --tun=userspace-networking > /tmp/tailscaled.log 2>&1 &
           sleep 5
           sudo $TAILSCALE_BIN up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
 
@@ -42,9 +43,9 @@ jobs:
       - name: Get Tailscale IP
         run: |
           TAILSCALE_BIN=$(which tailscale)
-          IP=$(timeout 5 $TAILSCALE_BIN ip -4 || echo "100.64.0.X")
+          IP=$(timeout 10 $TAILSCALE_BIN ip -4 || echo "ERROR_TAILSCALE_FAILED")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
-
+          
       - name: Run AzureBot Core Engine (ZSH)
         shell: bash {0}
         env:
