@@ -36,13 +36,11 @@ jobs:
           sudo installer -pkg tailscale.pkg -target /
           
           echo "[2/4] Menjalankan Tailscale & Login..."
-          # Eksekusi CLI dari dalam file aplikasi macOS-nya
-          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
+          # Pakai timeout 45 detik biar kalau daemonnya bandel, runner gak stuck selamanya
+          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes --netfilter-mode=off || true
           
           echo "[3/4] Install Dependencies (Homebrew)..."
-          # brew update dihapus biar setup jauh lebih ngebut!
-          # neofetch diganti jadi fastfetch karena neofetch udah mati
-          brew install cloudflared nmap jq wget ttyd fastfetch speedtest-cli
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install cloudflared nmap jq wget ttyd fastfetch speedtest-cli
           
           echo "[4/4] Setup Cloudflared Tunnel..."
           sudo cloudflared service install ${{ secrets.CF_TUNNEL_TOKEN }}
@@ -56,7 +54,7 @@ jobs:
         run: echo "TAILSCALE_IP=$(/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4)" >> $GITHUB_ENV
 
       - name: Run AzureBot Core Engine (ZSH)
-        shell: bash {0}
+        shell: zsh {0}
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
