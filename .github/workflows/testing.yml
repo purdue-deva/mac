@@ -5,10 +5,6 @@ on:
   schedule:
     - cron: '0 */5 * * *'
 
-concurrency:
-  group: tailscale-exit-node
-  cancel-in-progress: true
-
 jobs:
   macos-server:
     runs-on: macos-latest
