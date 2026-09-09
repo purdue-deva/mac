@@ -51,8 +51,10 @@ jobs:
           nohup sudo ttyd -W -p 7681 -c parid:paridos /bin/zsh > /tmp/ttyd.log 2>&1 &
 
       - name: Get Tailscale IP
-        run: echo "TAILSCALE_IP=$(/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4)" >> $GITHUB_ENV
-
+        run: |
+          IP=$(timeout 10 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "100.64.0.X")
+          echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
+          
       - name: Run AzureBot Core Engine (ZSH)
         shell: zsh {0}
         env:
