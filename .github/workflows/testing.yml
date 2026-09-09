@@ -49,7 +49,7 @@ jobs:
 
       - name: Get Tailscale IP
         run: |
-          IP=$(timeout 5 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "100.64.0.X")
+          IP=$(timeout 5 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "Gagal dapet ip bos")
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
 
       - name: Run AzureBot Core Engine (ZSH)
