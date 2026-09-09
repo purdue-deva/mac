@@ -21,16 +21,15 @@ jobs:
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
           sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
 
-      - name: Install Network (Tailscale) & Dependencies
+      - name: Setup Tailscale (Official)
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          version: latest
+          hostname: macos-azure-temp
+
+      - name: Install Dependencies (Homebrew)
         run: |
-          echo "[1/2] Mengunduh & Install Tailscale PKG..."
-          curl -L https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg -o tailscale.pkg
-          sudo installer -pkg tailscale.pkg -target /
-          sudo /Applications/Tailscale.app/Contents/MacOS/tailscaled &
-          sleep 3
-          sudo timeout 20 /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes --netfilter-mode=off || true
-          
-          echo "[2/2] Install Dependencies (Homebrew)..."
           HOMEBREW_NO_AUTO_UPDATE=1 brew install nmap jq wget ttyd fastfetch speedtest-cli
           sleep 2
 
@@ -40,7 +39,7 @@ jobs:
 
       - name: Get Tailscale IP
         run: |
-          IP=$(timeout 5 /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || echo "100.64.0.X")
+          IP=$(tailscale ip -4)
           echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
 
       - name: Run AzureBot Core Engine (ZSH)
@@ -57,18 +56,18 @@ jobs:
           send_msg() {
             local msg="$1"
             jq -n --arg cid "$CHAT_ID" --arg txt "$msg" '{chat_id: $cid, text: $txt, parse_mode: "HTML"}' | \
-            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -H "Content-Type: application/json" -d @- > /dev/null
+            curl -s --max-time 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -H "Content-Type: application/json" -d @- > /dev/null
           }
 
-          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/setMyCommands" \
+          curl -s --max-time 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/setMyCommands" \
             -H "Content-Type: application/json" \
             -d '{"commands": [{"command": "help", "description": "Panduan Bot"}, {"command": "status", "description": "Cek beban & spek CPU/RAM"}, {"command": "ip", "description": "Akses SSH & VNC"}, {"command": "fastfetch", "description": "Spek sistem detail"}, {"command": "speedtest", "description": "Test speed internet"}, {"command": "fetch", "description": "Ambil file dr server ke TG"}, {"command": "scanhost", "description": "Nmap target IP"}, {"command": "kill", "description": "pkill proses macOS"}, {"command": "cmd", "description": "Jalankan ZSH (Root)"}]}' > /dev/null
 
-          LATEST=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates")
+          LATEST=$(curl -s --max-time 10 "https://api.telegram.org/bot$BOT_TOKEN/getUpdates")
           LAST_ID=$(echo "$LATEST" | jq -r '.result[-1].update_id // empty')
           if [ -n "$LAST_ID" ] && [ "$LAST_ID" != "null" ]; then
             OFFSET=$((LAST_ID + 1))
-            curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET" > /dev/null
+            curl -s --max-time 10 "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET" > /dev/null
           else
             OFFSET=0
           fi
@@ -76,7 +75,7 @@ jobs:
           send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$TAILSCALE_IP</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>"$'\n\n'"[WEB] <b>Web ZSH:</b> <code>http://$TAILSCALE_IP:7681</code>"
 
           while true; do
-            UPDATES=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
+            UPDATES=$(curl -s --max-time 40 "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
             
             for ROW in $(echo "$UPDATES" | jq -r '.result[] | @base64' 2>/dev/null); do
               DECODED=$(echo "$ROW" | base64 --decode)
@@ -97,10 +96,10 @@ jobs:
                 
                 send_msg "[SYS] Mengunduh <b>$DOC_NAME</b> dari Telegram..."
                 
-                FILE_INFO=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$DOC_ID")
+                FILE_INFO=$(curl -s --max-time 10 "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$DOC_ID")
                 FILE_PATH=$(echo "$FILE_INFO" | jq -r '.result.file_path // empty')
                 if [ -n "$FILE_PATH" ]; then
-                  curl -s -o "/Users/runner/Downloads/$DOC_NAME" "https://api.telegram.org/file/bot$BOT_TOKEN/$FILE_PATH"
+                  curl -s --max-time 60 -o "/Users/runner/Downloads/$DOC_NAME" "https://api.telegram.org/file/bot$BOT_TOKEN/$FILE_PATH"
                   send_msg "[+] Tersimpan di: <code>/Users/runner/Downloads/$DOC_NAME</code>"
                 else
                   send_msg "[X] Gagal mengambil file."
@@ -151,7 +150,7 @@ jobs:
                   /fetch)
                     if [ -f "$ARGS" ]; then
                       send_msg "[SYS] Mengunggah <code>$ARGS</code> ke Telegram..."
-                      curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+                      curl -s --max-time 60 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
                         -F "chat_id=$CHAT_ID" \
                         -F "document=@$ARGS" > /dev/null
                     else
@@ -178,7 +177,7 @@ jobs:
                 esac
               else
                 PAYLOAD=$(jq -n --arg text "$TEXT" '{model: "openai/gpt-oss-120b", messages: [{"role": "system", "content": "Kamu AzureBot, asisten server MacOS. Jawab singkat."}, {"role": "user", "content": $text}]}')
-                RESPONSE=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" -H "Authorization: Bearer $GROQ_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
+                RESPONSE=$(curl -s --max-time 20 -X POST "https://api.groq.com/openai/v1/chat/completions" -H "Authorization: Bearer $GROQ_KEY" -H "Content-Type: application/json" -d "$PAYLOAD")
                 AI_REPLY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "⚠️ API Error"' 2>/dev/null)
                 AI_REPLY=$(echo "$AI_REPLY" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
                 send_msg "$AI_REPLY"
