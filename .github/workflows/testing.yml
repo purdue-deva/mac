@@ -35,9 +35,13 @@ jobs:
           curl -L https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg -o tailscale.pkg
           sudo installer -pkg tailscale.pkg -target /
           
-          echo "[2/4] Menjalankan Tailscale & Login..."
-          # Pakai timeout 45 detik biar kalau daemonnya bandel, runner gak stuck selamanya
-          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes --netfilter-mode=off || true
+          echo "[2/4] Menjalankan Tailscale Daemon & Login..."
+          # Nyalakan tailscaled secara manual di background agar CLI tidak block/freezing
+          sudo /Applications/Tailscale.app/Contents/MacOS/tailscaled &
+          sleep 3
+          
+          # Login dengan batasan waktu (timeout) 20 detik agar tidak nyangkut selamanya
+          sudo timeout 20 /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes || true
           
           echo "[3/4] Install Dependencies (Homebrew)..."
           HOMEBREW_NO_AUTO_UPDATE=1 brew install cloudflared nmap jq wget ttyd fastfetch speedtest-cli
