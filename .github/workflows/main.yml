@@ -40,8 +40,7 @@ jobs:
           sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
           
           echo "[3/4] Install Dependencies (Homebrew)..."
-          brew update
-          brew install cloudflared nmap jq wget ttyd neofetch speedtest-cli
+          brew install cloudflared nmap jq wget ttyd fastfetch speedtest-cli
           
           echo "[4/4] Setup Cloudflared Tunnel..."
           sudo cloudflared service install ${{ secrets.CF_TUNNEL_TOKEN }}
