@@ -37,13 +37,21 @@ jobs:
           hostname: "macos-azure-temp"
           args: --accept-routes --advertise-exit-node
 
-      - name: Install Dependencies & Cloudflared via Homebrew
+      - name: Install Dependencies & Network Core (Homebrew)
         run: |
           brew update
-          brew install cloudflared nmap jq wget ttyd neofetch speedtest-cli
+          # Install semua kebutuhan termasuk Tailscale
+          brew install tailscale cloudflared nmap jq wget ttyd neofetch speedtest-cli
           
-          # Setup Cloudflared Tunnel (Background Service)
-          # Pastikan di dashboard Cloudflare Zero Trust, domain mac.paridx.my.id di-route ke tcp://localhost:5900
+          # 1. Jalankan daemon Tailscale di background
+          sudo tailscaled > /tmp/tailscaled.log 2>&1 &
+          sleep 5 # Kasih waktu daemon buat bernapas
+          
+          # 2. Login ke Tailscale
+          # (Note: --advertise-exit-node dihilangkan karena macOS butuh permission GUI/kext khusus untuk exit node)
+          sudo tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes
+          
+          # 3. Setup Cloudflared Tunnel (Background Service)
           sudo cloudflared service install ${{ secrets.CF_TUNNEL_TOKEN }}
 
       - name: Jalankan Web Terminal (ZSH Root)
