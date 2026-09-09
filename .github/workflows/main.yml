@@ -20,8 +20,8 @@ jobs:
 
       - name: Setup Server Credentials, SSH & VNC (Screen Sharing)
         run: |
-          # Set password untuk user 'runner' di macOS
-          sudo dscl . -passwd /Users/runner "${{ secrets.RDP_PASS }}"
+          # Reset/Set password untuk user 'runner' menggunakan sysadminctl (lebih sakti dari dscl)
+          sudo sysadminctl -resetPasswordFor runner -newPassword "${{ secrets.RDP_PASS }}"
           
           # Aktifkan SSH Remote Login
           sudo systemsetup -setremotelogin on
@@ -29,7 +29,7 @@ jobs:
           # Aktifkan VNC Server (Apple Remote Desktop)
           # Note: Password VNC macOS maksimal 8 karakter, jika lebih akan dipotong otomatis.
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
-
+          
       - name: Install Network Core (Tailscale)
         uses: tailscale/github-action@v2
         with:
