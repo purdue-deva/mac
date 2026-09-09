@@ -19,25 +19,20 @@ jobs:
           sudo sysadminctl -resetPasswordFor runner -newPassword "${{ secrets.RDP_PASS }}"
           sudo systemsetup -setremotelogin on
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvncpassword -vncpassword "${{ secrets.RDP_PASS }}" -restart -agent -privs -all
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
 
-      - name: Install Network & Ngrok (PKG & Homebrew)
+      - name: Install Network (Tailscale) & Dependencies
         run: |
-          echo "[1/4] Mengunduh & Install Tailscale PKG..."
+          echo "[1/2] Mengunduh & Install Tailscale PKG..."
           curl -L https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg -o tailscale.pkg
           sudo installer -pkg tailscale.pkg -target /
           sudo /Applications/Tailscale.app/Contents/MacOS/tailscaled &
           sleep 3
           sudo timeout 20 /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname="macos-azure-temp" --accept-routes --netfilter-mode=off || true
           
-          echo "[2/4] Install Dependencies & Ngrok (Homebrew)..."
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install ngrok/ngrok/ngrok nmap jq wget ttyd fastfetch speedtest-cli
-          
-          echo "[3/4] Konfigurasi Ngrok AuthToken..."
-          ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
-          
-          echo "[4/4] Menjalankan Ngrok TCP Tunnel untuk VNC (Port 5900)..."
-          nohup ngrok tcp 5900 --log=stdout > /tmp/ngrok.log 2>&1 &
-          sleep 4
+          echo "[2/2] Install Dependencies (Homebrew)..."
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install nmap jq wget ttyd fastfetch speedtest-cli
+          sleep 2
 
       - name: Jalankan Web Terminal (ZSH Root)
         run: |
@@ -78,11 +73,7 @@ jobs:
             OFFSET=0
           fi
 
-          # Ambil Public TCP URL dari Ngrok API lokal
-          NGROK_TCP=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[0].public_url // "Gagal memuat Ngrok"')
-          CLEAN_NGROK=$(echo "$NGROK_TCP" | sed 's|tcp://||')
-
-          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$CLEAN_NGROK</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>"$'\n\n'"[WEB] <b>Web ZSH:</b> <code>http://$TAILSCALE_IP:7681</code>"
+          send_msg "[SYS] <b>MACOS SERVER ACTIVE!</b> 🍎🚀"$'\n\n'"[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$TAILSCALE_IP</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>"$'\n\n'"[WEB] <b>Web ZSH:</b> <code>http://$TAILSCALE_IP:7681</code>"
 
           while true; do
             UPDATES=$(curl -s "https://api.telegram.org/bot$BOT_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
@@ -126,7 +117,7 @@ jobs:
                 
                 case "$CMD" in
                   /help|/start) send_msg "[INFO] <b>COMMAND CENTER (MacOS)</b>" ;;
-                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$CLEAN_NGROK</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>" ;;
+                  /ip) send_msg "[KEY] <b>Network Info:</b>"$'\n'"- VNC Address: <code>$TAILSCALE_IP</code>"$'\n'"- Pass VNC: <code>$PTERO_DB_PASS</code>" ;;
                   /fastfetch) 
                     OUT=$(fastfetch -l none)
                     send_msg "[SYS] <b>Fastfetch:</b>"$'\n'"<pre>${OUT}</pre>" 
